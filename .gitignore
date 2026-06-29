@@ -1,11 +1,87 @@
+# Rust build output.
 /target/
+**/target/
+
+# Keep Cargo.lock for application/workspace reproducibility.
+!Cargo.lock
+
+# Local environment and secrets.
+.env
+.env.*
+!.env.example
+!.env.sample
+*.pem
+*.key
+*.crt
+*.p12
+*.pfx
+*.age
+*.gpg
+secrets.*
+
+# Logs, traces, and runtime output.
+*.log
+*.trace
+*.pid
+*.seed
+logs/
+tmp/
+temp/
+.cache/
+
+# Test and coverage artifacts.
+coverage/
+tarpaulin-report.html
+lcov.info
+*.profraw
+*.profdata
+
+# Benchmark and profiling output.
+criterion/
+flamegraph.svg
+perf.data*
+
+# Generated binaries and archives.
+*.rlib
+*.rmeta
+*.dSYM/
+*.exe
+*.dll
+*.dylib
+*.so
+*.a
+*.o
+*.out
+*.app
+*.zip
+*.tar
+*.tar.gz
+*.tgz
+
+# Rust tooling backups.
+**/*.rs.bk
+rustfmt.toml.bk
+
+# Editor and IDE files.
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# macOS and filesystem noise.
+.DS_Store
+.AppleDouble
+.LSOverride
+Icon?
+._*
+.Spotlight-V100
+.Trashes
 
 # Local Codex workspace folders.
 /outputs/
 /work/
 
-# Editor and OS noise.
-.DS_Store
-.idea/
-.vscode/
-*.swp
+# Misc local config.
+.direnv/
+.envrc
