@@ -1,0 +1,11 @@
+/target/
+
+# Local Codex workspace folders.
+/outputs/
+/work/
+
+# Editor and OS noise.
+.DS_Store
+.idea/
+.vscode/
+*.swp
