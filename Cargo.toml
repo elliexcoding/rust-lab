@@ -1,0 +1,14 @@
+[workspace]
+members = [
+  "crates/*",
+  "libs/*",
+]
+resolver = "2"
+
+[workspace.package]
+edition = "2021"
+license = "MIT"
+repository = "https://github.com/YOUR_USERNAME/terminal-toys"
+
+[workspace.dependencies]
+terminal-toy-kit = { path = "libs/terminal-toy-kit" }
