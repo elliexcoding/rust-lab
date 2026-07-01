@@ -8,7 +8,10 @@ Small Rust terminal experiments for learning the language through visual, playfu
 cargo run -p flutter-bird
 cargo run -p bouncing-ball
 cargo run -p matrix-rain
+cargo run -p black-hole
 ```
+
+Open `web/gargantua/index.html` for the browser-based black hole visualizer.
 
 ## Check Everything
 
@@ -23,6 +26,7 @@ cargo test --workspace
 ```text
 crates/              Runnable terminal toys
 libs/                Shared helper crates
+web/                 Browser-based visual demos
 ```
 
 Each app should start small and stay understandable. If two or three apps need the same drawing, timing, input, or cleanup logic, move that logic into `libs/terminal-toy-kit`.
