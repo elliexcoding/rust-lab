@@ -21,6 +21,12 @@ cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
 ```
 
+## Engineering Notes
+
+- [Engineering principles](docs/engineering-principles.md)
+- [Harness engineering principles](docs/harness-engineering-principles.md)
+- [AI-assisted development](docs/ai-assisted-development.md)
+
 ## Layout
 
 ```text
