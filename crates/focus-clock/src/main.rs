@@ -477,9 +477,9 @@ const CLOCK_PALETTE: DigitPalette = DigitPalette {
     title: ColorRgb::new(181, 236, 236),
     status: ColorRgb::new(94, 129, 141),
     steady: ColorRgb::new(74, 211, 214),
-    bright: ColorRgb::new(185, 255, 222),
+    bright: ColorRgb::new(148, 242, 255),
     entering: ColorRgb::new(35, 86, 106),
-    pop: ColorRgb::new(245, 255, 185),
+    pop: ColorRgb::new(128, 229, 255),
     leaving: ColorRgb::new(138, 209, 218),
     fade: ColorRgb::new(25, 49, 61),
     ghost: ColorRgb::new(17, 31, 42),
@@ -608,11 +608,16 @@ fn digit_row(display: &DisplayState, row: usize) -> Line<'static> {
         } else {
             display.previous.symbols[index]
         };
+        let progress = if before == *symbol {
+            1.0
+        } else {
+            display.progress
+        };
         spans.extend(symbol_spans(
             before,
             *symbol,
             row,
-            display.progress,
+            progress,
             index,
             display.palette,
         ));
@@ -927,6 +932,37 @@ mod tests {
             ClockFace::from_hms(0, 0, 0).previous_minute().hms(),
             (23, 59, 0)
         );
+    }
+
+    #[test]
+    fn unchanged_symbols_stay_steady_during_minute_transition() {
+        let mut transitioning =
+            DisplayState::clock(OffsetDateTime::from_unix_timestamp(60 * 60 + 35 * 60).unwrap());
+        transitioning.previous = ClockFace::from_hms(1, 34, 0);
+        transitioning.current = ClockFace::from_hms(1, 35, 0);
+        transitioning.progress = 0.2;
+
+        let steady =
+            DisplayState::clock(OffsetDateTime::from_unix_timestamp(60 * 60 + 35 * 60).unwrap());
+
+        assert_eq!(
+            digit_row(&transitioning, 0).spans[0].style,
+            digit_row(&steady, 0).spans[0].style
+        );
+    }
+
+    #[test]
+    fn clock_transition_highlight_stays_cool_toned() {
+        let Style {
+            fg: Some(Color::Rgb(red, green, blue)),
+            ..
+        } = cell_style(false, true, 0, 0, 0, 1.0, CLOCK_PALETTE)
+        else {
+            panic!("clock transition cell should use an rgb foreground");
+        };
+
+        assert!(blue > red);
+        assert!(green > red);
     }
 
     #[test]
