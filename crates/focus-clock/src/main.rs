@@ -110,7 +110,7 @@ fn handle_main_key(app: &mut App, now: Instant, code: KeyCode) -> bool {
         KeyCode::Esc | KeyCode::Char('q') => true,
         KeyCode::Char('t') => {
             app.mode = AppMode::TimerInput;
-            app.input.clear();
+            app.timer_input = TimerInput::default();
             app.input_invalid = false;
             false
         }
@@ -145,10 +145,10 @@ fn handle_timer_input_key(app: &mut App, now: Instant, code: KeyCode) -> bool {
             false
         }
         KeyCode::Enter => {
-            if let Some(duration) = parse_timer_input(&app.input) {
+            if let Some(duration) = app.timer_input.duration() {
                 app.timer = Some(Timer::new(duration, now));
                 app.mode = AppMode::Timer;
-                app.input.clear();
+                app.timer_input = TimerInput::default();
                 app.input_invalid = false;
             } else {
                 app.input_invalid = true;
@@ -156,12 +156,32 @@ fn handle_timer_input_key(app: &mut App, now: Instant, code: KeyCode) -> bool {
             false
         }
         KeyCode::Backspace => {
-            app.input.pop();
+            app.timer_input.backspace();
             app.input_invalid = false;
             false
         }
-        KeyCode::Char(ch) if is_timer_input_char(ch) && app.input.len() < 12 => {
-            app.input.push(ch);
+        KeyCode::Left => {
+            app.timer_input.move_left();
+            app.input_invalid = false;
+            false
+        }
+        KeyCode::Right => {
+            app.timer_input.move_right();
+            app.input_invalid = false;
+            false
+        }
+        KeyCode::Up => {
+            app.timer_input.increment_active();
+            app.input_invalid = false;
+            false
+        }
+        KeyCode::Down => {
+            app.timer_input.decrement_active();
+            app.input_invalid = false;
+            false
+        }
+        KeyCode::Char(ch) if ch.is_ascii_digit() => {
+            app.timer_input.push_digit(ch);
             app.input_invalid = false;
             false
         }
@@ -169,66 +189,11 @@ fn handle_timer_input_key(app: &mut App, now: Instant, code: KeyCode) -> bool {
     }
 }
 
-fn is_timer_input_char(ch: char) -> bool {
-    ch.is_ascii_digit() || matches!(ch, ':' | 'h' | 'H' | 'm' | 'M' | 's' | 'S')
-}
-
-fn parse_timer_input(input: &str) -> Option<Duration> {
-    let trimmed = input.trim().to_ascii_lowercase();
-    if trimmed.is_empty() {
-        return None;
-    }
-
-    let seconds = if let Some(value) = parse_suffixed_duration(&trimmed) {
-        value
-    } else if trimmed.contains(':') {
-        parse_colon_duration(&trimmed)?
-    } else {
-        let minutes = trimmed.parse::<u64>().ok()?;
-        minutes.checked_mul(60)?
-    };
-
-    if seconds == 0 {
-        return None;
-    }
-
-    Some(Duration::from_secs(seconds.min(MAX_TIMER_SECONDS)))
-}
-
-fn parse_suffixed_duration(input: &str) -> Option<u64> {
-    let suffix = input.chars().last()?;
-    let multiplier = match suffix {
-        'h' => 3600,
-        'm' => 60,
-        's' => 1,
-        _ => return None,
-    };
-    let value = input.strip_suffix(suffix)?.parse::<u64>().ok()?;
-    value.checked_mul(multiplier)
-}
-
-fn parse_colon_duration(input: &str) -> Option<u64> {
-    let parts = input
-        .split(':')
-        .map(str::parse::<u64>)
-        .collect::<Result<Vec<_>, _>>()
-        .ok()?;
-
-    match parts.as_slice() {
-        [minutes, seconds] if *seconds < 60 => minutes.checked_mul(60)?.checked_add(*seconds),
-        [hours, minutes, seconds] if *minutes < 60 && *seconds < 60 => hours
-            .checked_mul(3600)?
-            .checked_add(minutes.checked_mul(60)?)?
-            .checked_add(*seconds),
-        _ => None,
-    }
-}
-
 #[derive(Default)]
 struct App {
     mode: AppMode,
     timer: Option<Timer>,
-    input: String,
+    timer_input: TimerInput,
     input_invalid: bool,
 }
 
@@ -244,6 +209,129 @@ enum AppMode {
     Clock,
     TimerInput,
     Timer,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct TimerInput {
+    fields: [u32; 3],
+    buffers: [String; 3],
+    active: TimerField,
+}
+
+impl Default for TimerInput {
+    fn default() -> Self {
+        Self {
+            fields: [0; 3],
+            buffers: [String::new(), String::new(), String::new()],
+            active: TimerField::Minutes,
+        }
+    }
+}
+
+impl TimerInput {
+    fn duration(&self) -> Option<Duration> {
+        let seconds = u64::from(self.fields[TimerField::Hours.index()]) * 3600
+            + u64::from(self.fields[TimerField::Minutes.index()]) * 60
+            + u64::from(self.fields[TimerField::Seconds.index()]);
+
+        (seconds > 0).then(|| Duration::from_secs(seconds.min(MAX_TIMER_SECONDS)))
+    }
+
+    fn preview_duration(&self) -> Duration {
+        self.duration().unwrap_or(Duration::ZERO)
+    }
+
+    fn push_digit(&mut self, digit: char) {
+        let index = self.active.index();
+        if self.buffers[index].len() >= 2 {
+            self.buffers[index].clear();
+        }
+        self.buffers[index].push(digit);
+        self.fields[index] = self.buffers[index]
+            .parse::<u32>()
+            .unwrap_or(0)
+            .min(self.active.max_value());
+    }
+
+    fn backspace(&mut self) {
+        let index = self.active.index();
+        self.buffers[index].pop();
+        self.fields[index] = self.buffers[index].parse::<u32>().unwrap_or(0);
+    }
+
+    fn move_left(&mut self) {
+        self.active = self.active.previous();
+    }
+
+    fn move_right(&mut self) {
+        self.active = self.active.next();
+    }
+
+    fn increment_active(&mut self) {
+        let index = self.active.index();
+        self.fields[index] = (self.fields[index] + 1).min(self.active.max_value());
+        self.sync_active_buffer();
+    }
+
+    fn decrement_active(&mut self) {
+        let index = self.active.index();
+        self.fields[index] = self.fields[index].saturating_sub(1);
+        self.sync_active_buffer();
+    }
+
+    fn sync_active_buffer(&mut self) {
+        let index = self.active.index();
+        self.buffers[index] = if self.fields[index] == 0 {
+            String::new()
+        } else {
+            self.fields[index].to_string()
+        };
+    }
+
+    fn field_value(&self, field: TimerField) -> u32 {
+        self.fields[field.index()]
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+enum TimerField {
+    Hours,
+    #[default]
+    Minutes,
+    Seconds,
+}
+
+impl TimerField {
+    const fn index(self) -> usize {
+        match self {
+            Self::Hours => 0,
+            Self::Minutes => 1,
+            Self::Seconds => 2,
+        }
+    }
+
+    const fn max_value(self) -> u32 {
+        match self {
+            Self::Hours => 99,
+            Self::Minutes | Self::Seconds => 59,
+        }
+    }
+
+    const fn previous(self) -> Self {
+        match self {
+            Self::Hours => Self::Seconds,
+            Self::Minutes => Self::Hours,
+            Self::Seconds => Self::Minutes,
+        }
+    }
+
+    const fn next(self) -> Self {
+        match self {
+            Self::Hours => Self::Minutes,
+            Self::Minutes => Self::Seconds,
+            Self::Seconds => Self::Hours,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -322,10 +410,8 @@ impl DisplayState {
         }
     }
 
-    fn timer_input(input: &str, invalid: bool) -> Self {
-        let current = parse_timer_input(input)
-            .map(ClockFace::from_duration)
-            .unwrap_or_else(|| ClockFace::from_duration(Duration::ZERO));
+    fn timer_input(input: &TimerInput, invalid: bool) -> Self {
+        let current = ClockFace::from_duration(input.preview_duration());
 
         Self {
             title: " timer ",
@@ -335,7 +421,7 @@ impl DisplayState {
             lock_seconds: false,
             palette: TIMER_PALETTE,
             status: DisplayStatus::TimerInput {
-                input: input.to_string(),
+                input: input.clone(),
                 invalid,
             },
         }
@@ -366,7 +452,7 @@ impl DisplayState {
 
 enum DisplayStatus {
     Clock,
-    TimerInput { input: String, invalid: bool },
+    TimerInput { input: TimerInput, invalid: bool },
     TimerRunning,
     TimerPaused,
     TimerDone,
@@ -432,12 +518,12 @@ fn render(frame: &mut Frame, app: &App, now: OffsetDateTime, instant: Instant) {
 
 fn timer_display(app: &App, instant: Instant) -> DisplayState {
     if app.mode == AppMode::TimerInput {
-        return DisplayState::timer_input(&app.input, app.input_invalid);
+        return DisplayState::timer_input(&app.timer_input, app.input_invalid);
     }
 
     app.timer
         .map(|timer| DisplayState::timer(timer, instant))
-        .unwrap_or_else(|| DisplayState::timer_input("", false))
+        .unwrap_or_else(|| DisplayState::timer_input(&TimerInput::default(), false))
 }
 
 fn render_panel(frame: &mut Frame, display: &DisplayState, area: Rect) {
@@ -550,21 +636,67 @@ fn status_line(display: &DisplayState) -> Line<'static> {
             .centered()
             .style(style),
         DisplayStatus::TimerInput { ref input, invalid } => {
-            let prompt = if input.is_empty() {
-                " timer > _ ".to_string()
-            } else {
-                format!(" timer > {input}_ ")
-            };
-            let color = if invalid {
-                Color::Rgb(255, 118, 148)
-            } else {
-                display.palette.status.into()
-            };
-            Line::from(prompt)
-                .centered()
-                .style(Style::default().fg(color))
+            timer_input_line(input, invalid, display.palette)
         }
     }
+}
+
+fn timer_input_line(input: &TimerInput, invalid: bool, palette: DigitPalette) -> Line<'static> {
+    let base_style = Style::default().fg(palette.status.into());
+    let active_style = Style::default()
+        .fg(palette.pop.into())
+        .bg(Color::Rgb(39, 24, 57))
+        .add_modifier(Modifier::BOLD);
+    let error_style = Style::default().fg(Color::Rgb(255, 118, 148));
+
+    let mut spans = vec![Span::styled(" timer > ", base_style)];
+    push_timer_field_span(
+        &mut spans,
+        input,
+        TimerField::Hours,
+        active_style,
+        base_style,
+    );
+    spans.push(Span::styled(":", base_style));
+    push_timer_field_span(
+        &mut spans,
+        input,
+        TimerField::Minutes,
+        active_style,
+        base_style,
+    );
+    spans.push(Span::styled(":", base_style));
+    push_timer_field_span(
+        &mut spans,
+        input,
+        TimerField::Seconds,
+        active_style,
+        base_style,
+    );
+
+    if invalid {
+        spans.push(Span::styled("  set a nonzero time", error_style));
+    }
+
+    Line::from(spans).centered()
+}
+
+fn push_timer_field_span(
+    spans: &mut Vec<Span<'static>>,
+    input: &TimerInput,
+    field: TimerField,
+    active_style: Style,
+    base_style: Style,
+) {
+    let style = if input.active == field {
+        active_style
+    } else {
+        base_style
+    };
+    spans.push(Span::styled(
+        format!("{:02}", input.field_value(field)),
+        style,
+    ));
 }
 
 fn symbol_spans(
@@ -802,28 +934,62 @@ mod tests {
     }
 
     #[test]
-    fn timer_input_accepts_plain_minutes_suffixes_and_colons() {
-        assert_eq!(parse_timer_input("30"), Some(Duration::from_secs(30 * 60)));
-        assert_eq!(parse_timer_input("30m"), Some(Duration::from_secs(30 * 60)));
-        assert_eq!(parse_timer_input("90s"), Some(Duration::from_secs(90)));
-        assert_eq!(parse_timer_input("1h"), Some(Duration::from_secs(3600)));
+    fn structured_timer_input_edits_selected_field() {
+        let mut input = TimerInput::default();
+
+        input.push_digit('2');
+        input.push_digit('5');
+        assert_eq!(input.field_value(TimerField::Minutes), 25);
+        assert_eq!(input.duration(), Some(Duration::from_secs(25 * 60)));
+
+        input.move_right();
+        input.push_digit('3');
+        input.push_digit('0');
+        assert_eq!(input.field_value(TimerField::Seconds), 30);
+        assert_eq!(input.duration(), Some(Duration::from_secs(25 * 60 + 30)));
+
+        input.move_left();
+        input.move_left();
+        input.push_digit('1');
+        assert_eq!(input.field_value(TimerField::Hours), 1);
         assert_eq!(
-            parse_timer_input("25:00"),
-            Some(Duration::from_secs(25 * 60))
-        );
-        assert_eq!(
-            parse_timer_input("1:30:05"),
-            Some(Duration::from_secs(3600 + 30 * 60 + 5))
+            input.duration(),
+            Some(Duration::from_secs(3600 + 25 * 60 + 30))
         );
     }
 
     #[test]
-    fn timer_input_rejects_empty_zero_and_malformed_values() {
-        assert_eq!(parse_timer_input(""), None);
-        assert_eq!(parse_timer_input("0"), None);
-        assert_eq!(parse_timer_input("1:99"), None);
-        assert_eq!(parse_timer_input("1:2:99"), None);
-        assert_eq!(parse_timer_input("abc"), None);
+    fn structured_timer_input_clamps_minutes_and_seconds() {
+        let mut input = TimerInput::default();
+
+        input.push_digit('9');
+        input.push_digit('9');
+        assert_eq!(input.field_value(TimerField::Minutes), 59);
+
+        input.move_right();
+        input.push_digit('9');
+        input.push_digit('9');
+        assert_eq!(input.field_value(TimerField::Seconds), 59);
+    }
+
+    #[test]
+    fn structured_timer_input_backspace_and_arrow_steps() {
+        let mut input = TimerInput::default();
+
+        input.push_digit('4');
+        input.push_digit('2');
+        input.backspace();
+        assert_eq!(input.field_value(TimerField::Minutes), 4);
+
+        input.increment_active();
+        assert_eq!(input.field_value(TimerField::Minutes), 5);
+        input.decrement_active();
+        assert_eq!(input.field_value(TimerField::Minutes), 4);
+
+        input.move_left();
+        assert_eq!(input.active, TimerField::Hours);
+        input.move_left();
+        assert_eq!(input.active, TimerField::Seconds);
     }
 
     #[test]
