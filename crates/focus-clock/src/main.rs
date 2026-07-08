@@ -11,7 +11,7 @@ use ratatui::{
     widgets::{Block, Borders, Paragraph},
     Frame,
 };
-use time::OffsetDateTime;
+use time::{OffsetDateTime, UtcOffset};
 
 const FRAME_TIME: Duration = Duration::from_millis(33);
 const TRANSITION_TIME: f32 = 0.42;
@@ -22,6 +22,9 @@ const GAP: &str = "  ";
 const MAX_TIMER_SECONDS: u64 = 99 * 3600 + 59 * 60 + 59;
 const DISPLAY_WIDTH: u16 = 90;
 const DISPLAY_HEIGHT: u16 = 12;
+const GMT_PANEL_WIDTH: u16 = 20;
+const PANEL_GAP: u16 = 2;
+const CLOCK_GROUP_WIDTH: u16 = DISPLAY_WIDTH + PANEL_GAP + GMT_PANEL_WIDTH;
 
 const DIGITS: [[&str; DIGIT_ROWS]; 10] = [
     [
@@ -458,6 +461,27 @@ enum DisplayStatus {
     TimerDone,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct GmtTime {
+    hour: u8,
+    minute: u8,
+}
+
+impl GmtTime {
+    fn from_datetime(now: OffsetDateTime) -> Self {
+        let gmt = now.to_offset(UtcOffset::UTC);
+
+        Self {
+            hour: gmt.hour(),
+            minute: gmt.minute(),
+        }
+    }
+
+    fn time_text(self) -> String {
+        format!("{:02}:{:02}", self.hour, self.minute)
+    }
+}
+
 #[derive(Clone, Copy, Debug)]
 struct DigitPalette {
     border: ColorRgb,
@@ -502,17 +526,10 @@ fn render(frame: &mut Frame, app: &App, now: OffsetDateTime, instant: Instant) {
     let clock = DisplayState::clock(now);
 
     if app.shows_timer_panel() {
-        let (clock_area, timer_area) = stacked_areas(frame.area());
-        render_panel(frame, &clock, clock_area);
-
         let timer = timer_display(app, instant);
-        render_panel(frame, &timer, timer_area);
+        render_timer_layout(frame, &clock, &timer, now, frame.area());
     } else {
-        render_panel(
-            frame,
-            &clock,
-            centered(frame.area(), DISPLAY_WIDTH, DISPLAY_HEIGHT),
-        );
+        render_clock_group(frame, &clock, now, clock_group_area(frame.area()));
     }
 }
 
@@ -550,6 +567,101 @@ fn render_panel(frame: &mut Frame, display: &DisplayState, area: Rect) {
     );
 }
 
+fn render_clock_group(frame: &mut Frame, clock: &DisplayState, now: OffsetDateTime, area: Rect) {
+    if let Some((clock_area, gmt_area)) = clock_with_gmt_areas(area) {
+        render_panel(frame, clock, clock_area);
+        render_gmt_panel(frame, GmtTime::from_datetime(now), gmt_area);
+    } else {
+        let clock_area = centered(area, DISPLAY_WIDTH, DISPLAY_HEIGHT);
+        render_panel(frame, clock, clock_area);
+        render_gmt_badge(frame, GmtTime::from_datetime(now), clock_area);
+    }
+}
+
+fn render_timer_layout(
+    frame: &mut Frame,
+    clock: &DisplayState,
+    timer: &DisplayState,
+    now: OffsetDateTime,
+    area: Rect,
+) {
+    if let Some((clock_area, timer_area, gmt_area)) = timer_with_gmt_areas(area) {
+        render_panel(frame, clock, clock_area);
+        render_panel(frame, timer, timer_area);
+        render_gmt_panel(frame, GmtTime::from_datetime(now), gmt_area);
+    } else {
+        let (clock_area, timer_area) = stacked_areas(area);
+        render_panel(frame, clock, clock_area);
+        render_gmt_badge(frame, GmtTime::from_datetime(now), clock_area);
+        render_panel(frame, timer, timer_area);
+    }
+}
+
+fn render_gmt_panel(frame: &mut Frame, gmt: GmtTime, area: Rect) {
+    let border_style = Style::default().fg(CLOCK_PALETTE.border.into());
+    let title_style = Style::default()
+        .fg(CLOCK_PALETTE.title.into())
+        .add_modifier(Modifier::BOLD);
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(border_style)
+        .style(Style::default().bg(Color::Rgb(5, 8, 14)))
+        .title(Line::from(" GMT ").style(title_style))
+        .title_alignment(Alignment::Center);
+
+    frame.render_widget(
+        Paragraph::new(gmt_panel_lines(gmt, area.height.saturating_sub(2)))
+            .block(block)
+            .alignment(Alignment::Center)
+            .style(Style::default().bg(Color::Rgb(5, 8, 14))),
+        area,
+    );
+}
+
+fn gmt_panel_lines(gmt: GmtTime, inner_height: u16) -> Vec<Line<'static>> {
+    let label_style = Style::default().fg(CLOCK_PALETTE.status.into());
+    let time_style = Style::default()
+        .fg(CLOCK_PALETTE.bright.into())
+        .add_modifier(Modifier::BOLD);
+    let content = [
+        Line::from(Span::styled("greenwich", label_style)).centered(),
+        Line::from(Span::styled(gmt.time_text(), time_style)).centered(),
+        Line::from(Span::styled("mean time", label_style)).centered(),
+    ];
+    let top_padding = inner_height.saturating_sub(content.len() as u16) / 2;
+    let mut lines = Vec::with_capacity(top_padding as usize + content.len());
+
+    lines.extend((0..top_padding).map(|_| Line::raw("")));
+    lines.extend(content);
+
+    lines
+}
+
+fn render_gmt_badge(frame: &mut Frame, gmt: GmtTime, area: Rect) {
+    let label = format!(" GMT {} ", gmt.time_text());
+    let width = label.len() as u16;
+    if area.width <= width + 4 {
+        return;
+    }
+
+    let badge_area = Rect {
+        x: area.x + area.width - width - 2,
+        y: area.y,
+        width,
+        height: 1,
+    };
+    frame.render_widget(
+        Paragraph::new(Line::from(Span::styled(
+            label,
+            Style::default()
+                .fg(CLOCK_PALETTE.title.into())
+                .bg(Color::Rgb(5, 8, 14))
+                .add_modifier(Modifier::BOLD),
+        ))),
+        badge_area,
+    );
+}
+
 fn stacked_areas(area: Rect) -> (Rect, Rect) {
     let gap = if area.height > DISPLAY_HEIGHT * 2 {
         1
@@ -577,6 +689,77 @@ fn stacked_areas(area: Rect) -> (Rect, Rect) {
     };
 
     (top, bottom)
+}
+
+fn clock_group_area(area: Rect) -> Rect {
+    centered(area, clock_group_width(area.width), DISPLAY_HEIGHT)
+}
+
+fn clock_group_width(available_width: u16) -> u16 {
+    if available_width >= CLOCK_GROUP_WIDTH {
+        CLOCK_GROUP_WIDTH
+    } else {
+        available_width.min(DISPLAY_WIDTH)
+    }
+}
+
+fn clock_with_gmt_areas(area: Rect) -> Option<(Rect, Rect)> {
+    if area.width < CLOCK_GROUP_WIDTH {
+        return None;
+    }
+
+    let clock_area = Rect {
+        x: area.x,
+        y: area.y,
+        width: DISPLAY_WIDTH,
+        height: area.height,
+    };
+    let gmt_area = Rect {
+        x: area.x + DISPLAY_WIDTH + PANEL_GAP,
+        y: area.y,
+        width: GMT_PANEL_WIDTH,
+        height: area.height,
+    };
+
+    Some((clock_area, gmt_area))
+}
+
+fn timer_with_gmt_areas(area: Rect) -> Option<(Rect, Rect, Rect)> {
+    if area.width < CLOCK_GROUP_WIDTH {
+        return None;
+    }
+
+    let gap = if area.height > DISPLAY_HEIGHT * 2 {
+        1
+    } else {
+        0
+    };
+    let height = DISPLAY_HEIGHT
+        .min(area.height.saturating_sub(gap) / 2)
+        .max(1);
+    let total_height = height * 2 + gap;
+    let x = area.x + area.width.saturating_sub(CLOCK_GROUP_WIDTH) / 2;
+    let y = area.y + area.height.saturating_sub(total_height) / 2;
+    let clock_area = Rect {
+        x,
+        y,
+        width: DISPLAY_WIDTH,
+        height,
+    };
+    let timer_area = Rect {
+        x,
+        y: y + height + gap,
+        width: DISPLAY_WIDTH,
+        height,
+    };
+    let gmt_area = Rect {
+        x: x + DISPLAY_WIDTH + PANEL_GAP,
+        y,
+        width: GMT_PANEL_WIDTH,
+        height: total_height,
+    };
+
+    Some((clock_area, timer_area, gmt_area))
 }
 
 fn centered(area: Rect, width: u16, height: u16) -> Rect {
@@ -932,6 +1115,69 @@ mod tests {
             ClockFace::from_hms(0, 0, 0).previous_minute().hms(),
             (23, 59, 0)
         );
+    }
+
+    #[test]
+    fn gmt_time_uses_utc_hour_and_minute() {
+        let tokyo_time = OffsetDateTime::from_unix_timestamp(60 * 60 + 23 * 60)
+            .unwrap()
+            .to_offset(UtcOffset::from_hms(9, 0, 0).unwrap());
+
+        assert_eq!(
+            GmtTime::from_datetime(tokyo_time),
+            GmtTime {
+                hour: 1,
+                minute: 23
+            }
+        );
+    }
+
+    #[test]
+    fn clock_layout_adds_gmt_panel_when_wide_enough() {
+        let area = Rect {
+            x: 3,
+            y: 5,
+            width: CLOCK_GROUP_WIDTH,
+            height: DISPLAY_HEIGHT,
+        };
+        let Some((clock, gmt)) = clock_with_gmt_areas(area) else {
+            panic!("wide clock area should include a GMT panel");
+        };
+
+        assert_eq!(clock.width, DISPLAY_WIDTH);
+        assert_eq!(gmt.x, area.x + DISPLAY_WIDTH + PANEL_GAP);
+        assert_eq!(gmt.width, GMT_PANEL_WIDTH);
+    }
+
+    #[test]
+    fn timer_layout_keeps_clock_and_timer_in_left_column() {
+        let area = Rect {
+            x: 2,
+            y: 3,
+            width: CLOCK_GROUP_WIDTH,
+            height: DISPLAY_HEIGHT * 2 + 1,
+        };
+        let Some((clock, timer, gmt)) = timer_with_gmt_areas(area) else {
+            panic!("wide timer area should include a GMT column");
+        };
+
+        assert_eq!(clock.x, timer.x);
+        assert_eq!(clock.width, timer.width);
+        assert_eq!(clock.width, DISPLAY_WIDTH);
+        assert_eq!(gmt.x, clock.x + DISPLAY_WIDTH + PANEL_GAP);
+        assert_eq!(gmt.height, clock.height + timer.height + 1);
+    }
+
+    #[test]
+    fn clock_layout_uses_compact_width_when_narrow() {
+        assert_eq!(clock_group_width(CLOCK_GROUP_WIDTH - 1), DISPLAY_WIDTH);
+        assert!(clock_with_gmt_areas(Rect {
+            x: 0,
+            y: 0,
+            width: CLOCK_GROUP_WIDTH - 1,
+            height: DISPLAY_HEIGHT,
+        })
+        .is_none());
     }
 
     #[test]
