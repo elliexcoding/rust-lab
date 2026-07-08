@@ -68,8 +68,16 @@ fn run(terminal: &mut ratatui::DefaultTerminal) -> io::Result<()> {
             u32::from(now.minute()),
             u32::from(now.second()),
         );
-        let previous = clock.previous_second();
-        let progress = transition_progress(now.nanosecond());
+        let previous = if now.second() == 0 {
+            clock.previous_minute()
+        } else {
+            clock
+        };
+        let progress = if now.second() == 0 {
+            transition_progress(now.nanosecond())
+        } else {
+            1.0
+        };
 
         terminal.draw(|frame| render(frame, &previous, &clock, progress))?;
 
@@ -151,7 +159,11 @@ fn clock_row(
     let mut spans = Vec::new();
 
     for (index, symbol) in current.symbols.iter().enumerate() {
-        let before = previous.symbols[index];
+        let before = if index >= ClockFace::SECONDS_START {
+            *symbol
+        } else {
+            previous.symbols[index]
+        };
         spans.extend(symbol_spans(before, *symbol, row, progress, index));
         spans.push(Span::raw(GAP));
     }
@@ -183,15 +195,19 @@ fn symbol_spans(
             symbol_index,
             progress,
         );
-        let glyph = if old == b'1' || new == b'1' {
-            CELL
-        } else {
-            GHOST
-        };
+        let glyph = cell_glyph(old == b'1', new == b'1', progress);
         spans.push(Span::styled(glyph, style));
     }
 
     spans
+}
+
+fn cell_glyph(old: bool, new: bool, progress: f32) -> &'static str {
+    if new || (old && progress < 1.0) {
+        CELL
+    } else {
+        GHOST
+    }
 }
 
 fn cell_style(
@@ -280,6 +296,8 @@ struct ClockFace {
 }
 
 impl ClockFace {
+    const SECONDS_START: usize = 6;
+
     fn from_hms(hour: u32, minute: u32, second: u32) -> Self {
         Self {
             symbols: [
@@ -295,15 +313,11 @@ impl ClockFace {
         }
     }
 
-    fn previous_second(self) -> Self {
-        let (hour, minute, second) = self.hms();
-        let previous_total = (hour * 3600 + minute * 60 + second + 24 * 3600 - 1) % (24 * 3600);
+    fn previous_minute(self) -> Self {
+        let (hour, minute, _) = self.hms();
+        let previous_total = (hour * 60 + minute + 24 * 60 - 1) % (24 * 60);
 
-        Self::from_hms(
-            previous_total / 3600,
-            (previous_total / 60) % 60,
-            previous_total % 60,
-        )
+        Self::from_hms(previous_total / 60, previous_total % 60, 0)
     }
 
     fn hms(self) -> (u32, u32, u32) {
@@ -356,11 +370,18 @@ mod tests {
     }
 
     #[test]
-    fn previous_second_wraps_midnight() {
+    fn previous_minute_wraps_midnight() {
         assert_eq!(
-            ClockFace::from_hms(0, 0, 0).previous_second().hms(),
-            (23, 59, 59)
+            ClockFace::from_hms(0, 0, 0).previous_minute().hms(),
+            (23, 59, 0)
         );
+    }
+
+    #[test]
+    fn completed_fade_uses_ghost_glyph_for_old_cells() {
+        assert_eq!(cell_glyph(true, false, 0.5), CELL);
+        assert_eq!(cell_glyph(true, false, 1.0), GHOST);
+        assert_eq!(cell_glyph(false, true, 1.0), CELL);
     }
 
     #[test]

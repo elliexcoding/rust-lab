@@ -9,6 +9,7 @@ cargo run -p flutter-bird
 cargo run -p bouncing-ball
 cargo run -p matrix-rain
 cargo run -p black-hole
+cargo run -p focus-clock
 ```
 
 Open `web/gargantua/index.html` for the browser-based black hole visualizer.
