@@ -645,8 +645,7 @@ fn timer_input_line(input: &TimerInput, invalid: bool, palette: DigitPalette) ->
     let base_style = Style::default().fg(palette.status.into());
     let active_style = Style::default()
         .fg(palette.pop.into())
-        .bg(Color::Rgb(39, 24, 57))
-        .add_modifier(Modifier::BOLD);
+        .bg(Color::Rgb(39, 24, 57));
     let error_style = Style::default().fg(Color::Rgb(255, 118, 148));
 
     let mut spans = vec![Span::styled(" timer > ", base_style)];
@@ -693,10 +692,14 @@ fn push_timer_field_span(
     } else {
         base_style
     };
-    spans.push(Span::styled(
-        format!("{:02}", input.field_value(field)),
-        style,
-    ));
+    let value = input.field_value(field);
+    let segment = if input.active == field {
+        format!("[{value:02}]")
+    } else {
+        format!(" {value:02} ")
+    };
+
+    spans.push(Span::styled(segment, style));
 }
 
 fn symbol_spans(
@@ -990,6 +993,23 @@ mod tests {
         assert_eq!(input.active, TimerField::Hours);
         input.move_left();
         assert_eq!(input.active, TimerField::Seconds);
+    }
+
+    #[test]
+    fn timer_input_line_width_stays_stable_when_marker_moves() {
+        let mut input = TimerInput::default();
+        input.push_digit('2');
+        input.push_digit('5');
+
+        let minutes_width = timer_input_line(&input, false, TIMER_PALETTE).width();
+        input.move_left();
+        let hours_width = timer_input_line(&input, false, TIMER_PALETTE).width();
+        input.move_right();
+        input.move_right();
+        let seconds_width = timer_input_line(&input, false, TIMER_PALETTE).width();
+
+        assert_eq!(minutes_width, hours_width);
+        assert_eq!(minutes_width, seconds_width);
     }
 
     #[test]
