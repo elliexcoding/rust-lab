@@ -860,6 +860,7 @@ fn timer_input_line(input: &TimerInput, invalid: bool, palette: DigitPalette) ->
         active_style,
         base_style,
     );
+    spans.push(Span::styled("  esc clock", base_style));
 
     if invalid {
         spans.push(Span::styled("  set a nonzero time", error_style));
@@ -1292,6 +1293,19 @@ mod tests {
 
         assert_eq!(minutes_width, hours_width);
         assert_eq!(minutes_width, seconds_width);
+    }
+
+    #[test]
+    fn timer_input_line_shows_escape_hint() {
+        let input = TimerInput::default();
+        let line = timer_input_line(&input, false, TIMER_PALETTE);
+        let text = line
+            .spans
+            .iter()
+            .map(|span| span.content.as_ref())
+            .collect::<String>();
+
+        assert!(text.contains("esc clock"));
     }
 
     #[test]
