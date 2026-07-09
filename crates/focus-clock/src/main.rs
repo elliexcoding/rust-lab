@@ -25,6 +25,9 @@ const DISPLAY_HEIGHT: u16 = 12;
 const GMT_PANEL_WIDTH: u16 = 20;
 const PANEL_GAP: u16 = 2;
 const CLOCK_GROUP_WIDTH: u16 = DISPLAY_WIDTH + PANEL_GAP + GMT_PANEL_WIDTH;
+const BACKGROUND: ColorRgb = ColorRgb::new(5, 8, 14);
+const TIMER_INPUT_ACTIVE_BACKGROUND: ColorRgb = ColorRgb::new(39, 24, 57);
+const ERROR_TEXT: ColorRgb = ColorRgb::new(255, 118, 148);
 
 const DIGITS: [[&str; DIGIT_ROWS]; 10] = [
     [
@@ -547,7 +550,7 @@ fn render_panel(frame: &mut Frame, display: &DisplayState, area: Rect) {
     let block = Block::default()
         .borders(Borders::ALL)
         .border_style(Style::default().fg(display.palette.border.into()))
-        .style(Style::default().bg(Color::Rgb(5, 8, 14)))
+        .style(Style::default().bg(BACKGROUND.into()))
         .title(
             Line::from(display.title).style(
                 Style::default()
@@ -562,15 +565,15 @@ fn render_panel(frame: &mut Frame, display: &DisplayState, area: Rect) {
         Paragraph::new(lines)
             .block(block)
             .alignment(Alignment::Center)
-            .style(Style::default().bg(Color::Rgb(5, 8, 14))),
+            .style(Style::default().bg(BACKGROUND.into())),
         area,
     );
 }
 
 fn render_clock_group(frame: &mut Frame, clock: &DisplayState, now: OffsetDateTime, area: Rect) {
-    if let Some((clock_area, gmt_area)) = clock_with_gmt_areas(area) {
-        render_panel(frame, clock, clock_area);
-        render_gmt_panel(frame, GmtTime::from_datetime(now), gmt_area);
+    if let Some(areas) = clock_with_gmt_areas(area) {
+        render_panel(frame, clock, areas.clock);
+        render_gmt_panel(frame, GmtTime::from_datetime(now), areas.gmt);
     } else {
         let clock_area = centered(area, DISPLAY_WIDTH, DISPLAY_HEIGHT);
         render_panel(frame, clock, clock_area);
@@ -585,15 +588,15 @@ fn render_timer_layout(
     now: OffsetDateTime,
     area: Rect,
 ) {
-    if let Some((clock_area, timer_area, gmt_area)) = timer_with_gmt_areas(area) {
-        render_panel(frame, clock, clock_area);
-        render_panel(frame, timer, timer_area);
-        render_gmt_panel(frame, GmtTime::from_datetime(now), gmt_area);
+    if let Some(areas) = timer_with_gmt_areas(area) {
+        render_panel(frame, clock, areas.clock);
+        render_panel(frame, timer, areas.timer);
+        render_gmt_panel(frame, GmtTime::from_datetime(now), areas.gmt);
     } else {
-        let (clock_area, timer_area) = stacked_areas(area);
-        render_panel(frame, clock, clock_area);
-        render_gmt_badge(frame, GmtTime::from_datetime(now), clock_area);
-        render_panel(frame, timer, timer_area);
+        let areas = stacked_areas(area);
+        render_panel(frame, clock, areas.top);
+        render_gmt_badge(frame, GmtTime::from_datetime(now), areas.top);
+        render_panel(frame, timer, areas.bottom);
     }
 }
 
@@ -605,7 +608,7 @@ fn render_gmt_panel(frame: &mut Frame, gmt: GmtTime, area: Rect) {
     let block = Block::default()
         .borders(Borders::ALL)
         .border_style(border_style)
-        .style(Style::default().bg(Color::Rgb(5, 8, 14)))
+        .style(Style::default().bg(BACKGROUND.into()))
         .title(Line::from(" GMT ").style(title_style))
         .title_alignment(Alignment::Center);
 
@@ -613,7 +616,7 @@ fn render_gmt_panel(frame: &mut Frame, gmt: GmtTime, area: Rect) {
         Paragraph::new(gmt_panel_lines(gmt, area.height.saturating_sub(2)))
             .block(block)
             .alignment(Alignment::Center)
-            .style(Style::default().bg(Color::Rgb(5, 8, 14))),
+            .style(Style::default().bg(BACKGROUND.into())),
         area,
     );
 }
@@ -655,14 +658,33 @@ fn render_gmt_badge(frame: &mut Frame, gmt: GmtTime, area: Rect) {
             label,
             Style::default()
                 .fg(CLOCK_PALETTE.title.into())
-                .bg(Color::Rgb(5, 8, 14))
+                .bg(BACKGROUND.into())
                 .add_modifier(Modifier::BOLD),
         ))),
         badge_area,
     );
 }
 
-fn stacked_areas(area: Rect) -> (Rect, Rect) {
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct StackedAreas {
+    top: Rect,
+    bottom: Rect,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct ClockGroupAreas {
+    clock: Rect,
+    gmt: Rect,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct TimerLayoutAreas {
+    clock: Rect,
+    timer: Rect,
+    gmt: Rect,
+}
+
+fn stacked_areas(area: Rect) -> StackedAreas {
     let gap = if area.height > DISPLAY_HEIGHT * 2 {
         1
     } else {
@@ -688,7 +710,7 @@ fn stacked_areas(area: Rect) -> (Rect, Rect) {
         height,
     };
 
-    (top, bottom)
+    StackedAreas { top, bottom }
 }
 
 fn clock_group_area(area: Rect) -> Rect {
@@ -703,7 +725,7 @@ fn clock_group_width(available_width: u16) -> u16 {
     }
 }
 
-fn clock_with_gmt_areas(area: Rect) -> Option<(Rect, Rect)> {
+fn clock_with_gmt_areas(area: Rect) -> Option<ClockGroupAreas> {
     if area.width < CLOCK_GROUP_WIDTH {
         return None;
     }
@@ -721,10 +743,13 @@ fn clock_with_gmt_areas(area: Rect) -> Option<(Rect, Rect)> {
         height: area.height,
     };
 
-    Some((clock_area, gmt_area))
+    Some(ClockGroupAreas {
+        clock: clock_area,
+        gmt: gmt_area,
+    })
 }
 
-fn timer_with_gmt_areas(area: Rect) -> Option<(Rect, Rect, Rect)> {
+fn timer_with_gmt_areas(area: Rect) -> Option<TimerLayoutAreas> {
     if area.width < CLOCK_GROUP_WIDTH {
         return None;
     }
@@ -759,7 +784,11 @@ fn timer_with_gmt_areas(area: Rect) -> Option<(Rect, Rect, Rect)> {
         height: total_height,
     };
 
-    Some((clock_area, timer_area, gmt_area))
+    Some(TimerLayoutAreas {
+        clock: clock_area,
+        timer: timer_area,
+        gmt: gmt_area,
+    })
 }
 
 fn centered(area: Rect, width: u16, height: u16) -> Rect {
@@ -833,8 +862,8 @@ fn timer_input_line(input: &TimerInput, invalid: bool, palette: DigitPalette) ->
     let base_style = Style::default().fg(palette.status.into());
     let active_style = Style::default()
         .fg(palette.pop.into())
-        .bg(Color::Rgb(39, 24, 57));
-    let error_style = Style::default().fg(Color::Rgb(255, 118, 148));
+        .bg(TIMER_INPUT_ACTIVE_BACKGROUND.into());
+    let error_style = Style::default().fg(ERROR_TEXT.into());
 
     let mut spans = vec![Span::styled(" timer > ", base_style)];
     push_timer_field_span(
@@ -951,9 +980,7 @@ fn cell_style(
         (false, false) => palette.ghost,
     };
 
-    let mut style = Style::default()
-        .fg(foreground.into())
-        .bg(Color::Rgb(5, 8, 14));
+    let mut style = Style::default().fg(foreground.into()).bg(BACKGROUND.into());
     if new && progress > 0.12 {
         style = style.add_modifier(Modifier::BOLD);
     }
@@ -1141,13 +1168,13 @@ mod tests {
             width: CLOCK_GROUP_WIDTH,
             height: DISPLAY_HEIGHT,
         };
-        let Some((clock, gmt)) = clock_with_gmt_areas(area) else {
+        let Some(areas) = clock_with_gmt_areas(area) else {
             panic!("wide clock area should include a GMT panel");
         };
 
-        assert_eq!(clock.width, DISPLAY_WIDTH);
-        assert_eq!(gmt.x, area.x + DISPLAY_WIDTH + PANEL_GAP);
-        assert_eq!(gmt.width, GMT_PANEL_WIDTH);
+        assert_eq!(areas.clock.width, DISPLAY_WIDTH);
+        assert_eq!(areas.gmt.x, area.x + DISPLAY_WIDTH + PANEL_GAP);
+        assert_eq!(areas.gmt.width, GMT_PANEL_WIDTH);
     }
 
     #[test]
@@ -1158,15 +1185,18 @@ mod tests {
             width: CLOCK_GROUP_WIDTH,
             height: DISPLAY_HEIGHT * 2 + 1,
         };
-        let Some((clock, timer, gmt)) = timer_with_gmt_areas(area) else {
+        let Some(areas) = timer_with_gmt_areas(area) else {
             panic!("wide timer area should include a GMT column");
         };
 
-        assert_eq!(clock.x, timer.x);
-        assert_eq!(clock.width, timer.width);
-        assert_eq!(clock.width, DISPLAY_WIDTH);
-        assert_eq!(gmt.x, clock.x + DISPLAY_WIDTH + PANEL_GAP);
-        assert_eq!(gmt.height, clock.height + timer.height + 1);
+        assert_eq!(areas.clock.x, areas.timer.x);
+        assert_eq!(areas.clock.width, areas.timer.width);
+        assert_eq!(areas.clock.width, DISPLAY_WIDTH);
+        assert_eq!(areas.gmt.x, areas.clock.x + DISPLAY_WIDTH + PANEL_GAP);
+        assert_eq!(
+            areas.gmt.height,
+            areas.clock.height + areas.timer.height + 1
+        );
     }
 
     #[test]
