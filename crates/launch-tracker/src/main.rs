@@ -1,6 +1,5 @@
 mod api;
 mod app;
-mod globe;
 mod ui;
 
 use std::time::Duration;
@@ -10,7 +9,7 @@ use chrono::Utc;
 use crossterm::event::{self, Event, KeyCode, KeyEventKind};
 use ratatui::DefaultTerminal;
 
-use app::{App, View};
+use app::App;
 
 fn main() -> Result<()> {
     let mut terminal = ratatui::init();
@@ -27,7 +26,6 @@ fn run(terminal: &mut DefaultTerminal) -> Result<()> {
         let now = Utc::now();
         app.poll_refresh(now);
         app.maybe_auto_refresh();
-        app.advance_animation();
         terminal.draw(|frame| ui::draw(frame, &app, now))?;
 
         if event::poll(Duration::from_millis(100))? {
@@ -45,10 +43,6 @@ fn run(terminal: &mut DefaultTerminal) -> Result<()> {
                 KeyCode::Home | KeyCode::Char('g') => app.select_first(),
                 KeyCode::End | KeyCode::Char('G') => app.select_last(),
                 KeyCode::Char('r') => app.begin_refresh(),
-                KeyCode::Tab => app.toggle_view(),
-                KeyCode::Char('1') => app.set_view(View::Missions),
-                KeyCode::Char('2') => app.set_view(View::Globe),
-                KeyCode::Char(' ') => app.toggle_globe_pause(),
                 _ => {}
             }
         }

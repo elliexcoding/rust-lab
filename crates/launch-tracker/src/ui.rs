@@ -9,8 +9,7 @@ use ratatui::{
 
 use crate::{
     api::Launch,
-    app::{countdown_label, countdown_progress, App, View},
-    globe,
+    app::{countdown_label, countdown_progress, App},
 };
 
 const ACCENT: Color = Color::Rgb(80, 220, 255);
@@ -53,10 +52,6 @@ fn draw_header(frame: &mut Frame<'_>, area: Rect, app: &App, now: DateTime<Utc>)
             Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
         ),
         Span::styled(activity, Style::default().fg(WARM)),
-        Span::raw("  "),
-        view_tab("1 MISSIONS", app.view == View::Missions),
-        Span::raw(" "),
-        view_tab("2 GLOBE", app.view == View::Globe),
         Span::raw("   "),
         Span::styled(timestamp, Style::default().fg(MUTED)),
     ]))
@@ -67,18 +62,6 @@ fn draw_header(frame: &mut Frame<'_>, area: Rect, app: &App, now: DateTime<Utc>)
             .border_style(Style::default().fg(ACCENT)),
     );
     frame.render_widget(header, area);
-}
-
-fn view_tab(label: &str, active: bool) -> Span<'_> {
-    let style = if active {
-        Style::default()
-            .fg(Color::Black)
-            .bg(ACCENT)
-            .add_modifier(Modifier::BOLD)
-    } else {
-        Style::default().fg(MUTED)
-    };
-    Span::styled(format!(" {label} "), style)
 }
 
 fn draw_empty_state(frame: &mut Frame<'_>, area: Rect, app: &App) {
@@ -112,13 +95,6 @@ fn draw_empty_state(frame: &mut Frame<'_>, area: Rect, app: &App) {
 }
 
 fn draw_dashboard(frame: &mut Frame<'_>, area: Rect, app: &App, now: DateTime<Utc>) {
-    match app.view {
-        View::Missions => draw_mission_dashboard(frame, area, app, now),
-        View::Globe => draw_globe_dashboard(frame, area, app, now),
-    }
-}
-
-fn draw_mission_dashboard(frame: &mut Frame<'_>, area: Rect, app: &App, now: DateTime<Utc>) {
     let horizontal = area.width >= 88;
     let panels = Layout::default()
         .direction(if horizontal {
@@ -136,54 +112,6 @@ fn draw_mission_dashboard(frame: &mut Frame<'_>, area: Rect, app: &App, now: Dat
     draw_launch_list(frame, panels[0], app, now);
     if let Some(launch) = app.selected_launch() {
         draw_launch_detail(frame, panels[1], launch, now);
-    }
-}
-
-fn draw_globe_dashboard(frame: &mut Frame<'_>, area: Rect, app: &App, now: DateTime<Utc>) {
-    let horizontal = area.width >= 76;
-    let panels = Layout::default()
-        .direction(if horizontal {
-            Direction::Horizontal
-        } else {
-            Direction::Vertical
-        })
-        .constraints(if horizontal {
-            [Constraint::Percentage(34), Constraint::Percentage(66)]
-        } else {
-            [Constraint::Percentage(38), Constraint::Percentage(62)]
-        })
-        .split(area);
-
-    draw_launch_list(frame, panels[0], app, now);
-
-    let globe_panel =
-        Layout::vertical([Constraint::Min(7), Constraint::Length(3)]).split(panels[1]);
-    globe::draw(
-        frame,
-        globe_panel[0],
-        &app.launches,
-        app.selected,
-        app.globe_rotation,
-        app.globe_paused,
-    );
-
-    if let Some(launch) = app.selected_launch() {
-        let progress = countdown_progress(launch.t0, now);
-        let color = if progress >= 0.95 { Color::Red } else { WARM };
-        let gauge = Gauge::default()
-            .block(
-                Block::default()
-                    .title(format!(" {} · FINAL 7-DAY COUNTDOWN ", launch.name))
-                    .borders(Borders::ALL)
-                    .border_style(Style::default().fg(MUTED)),
-            )
-            .gauge_style(Style::default().fg(color).bg(Color::Rgb(25, 32, 38)))
-            .label(Span::styled(
-                countdown_label(launch.t0, now),
-                Style::default().fg(Color::White).bold(),
-            ))
-            .ratio(progress);
-        frame.render_widget(gauge, globe_panel[1]);
     }
 }
 
@@ -312,19 +240,8 @@ fn draw_footer(frame: &mut Frame<'_>, area: Rect, app: &App) {
         .as_deref()
         .map(|message| format!("  |  {message}"))
         .unwrap_or_default();
-    let globe_control = if app.view == View::Globe {
-        if app.globe_paused {
-            "space:resume "
-        } else {
-            "space:pause "
-        }
-    } else {
-        ""
-    };
     let footer = Paragraph::new(Line::from(vec![
         Span::styled(" ↑↓/jk ", Style::default().fg(ACCENT).bold()),
-        Span::styled("tab:view ", Style::default().fg(ACCENT).bold()),
-        Span::styled(globe_control, Style::default().fg(ACCENT).bold()),
         Span::styled("r:refresh ", Style::default().fg(ACCENT).bold()),
         Span::styled("q:quit ", Style::default().fg(ACCENT).bold()),
         Span::styled("Data by RocketLaunch.Live", Style::default().fg(MUTED)),
@@ -363,18 +280,12 @@ mod tests {
             provider: "Test Provider".to_string(),
             vehicle: "Test Vehicle".to_string(),
             pad: "Test Pad".to_string(),
-            site_name: "Test Site".to_string(),
             location: "Test Site".to_string(),
-            coordinates: Some(crate::api::GeoPoint {
-                latitude: 0.0,
-                longitude: 0.0,
-            }),
             t0: Some(now + Duration::days(3) + Duration::hours(12)),
             date_estimate: "Aug 4".to_string(),
             description: "A render test mission.".to_string(),
             weather: None,
         });
-        app.set_view(View::Missions);
         let backend = TestBackend::new(80, 24);
         let mut terminal = Terminal::new(backend).expect("test terminal");
 
@@ -391,45 +302,5 @@ mod tests {
             .collect::<String>();
         assert!(screen.contains("FINAL 7-DAY COUNTDOWN"));
         assert!(screen.contains("T-3d 12h 00m 00s"));
-    }
-
-    #[test]
-    fn globe_and_site_marker_render_at_eighty_by_twenty_four() {
-        let now = Utc.with_ymd_and_hms(2026, 8, 1, 10, 0, 0).unwrap();
-        let mut app = App::new();
-        app.launches.push(Launch {
-            id: 1,
-            name: "Test Mission".to_string(),
-            provider: "Test Provider".to_string(),
-            vehicle: "Test Vehicle".to_string(),
-            pad: "Test Pad".to_string(),
-            site_name: "Test Site".to_string(),
-            location: "Test Site".to_string(),
-            coordinates: Some(crate::api::GeoPoint {
-                latitude: 0.0,
-                longitude: 0.0,
-            }),
-            t0: Some(now + Duration::days(3)),
-            date_estimate: "Aug 4".to_string(),
-            description: "A render test mission.".to_string(),
-            weather: None,
-        });
-        let backend = TestBackend::new(80, 24);
-        let mut terminal = Terminal::new(backend).expect("test terminal");
-
-        terminal
-            .draw(|frame| draw(frame, &app, now))
-            .expect("render globe");
-
-        let screen = terminal
-            .backend()
-            .buffer()
-            .content
-            .iter()
-            .map(|cell| cell.symbol())
-            .collect::<String>();
-        assert!(screen.contains("ROTATING GLOBE"));
-        assert!(screen.contains("Test Site"));
-        assert!(screen.contains("T-3d 00h 00m 00s"));
     }
 }

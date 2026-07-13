@@ -6,22 +6,12 @@ use std::{
 
 use chrono::{DateTime, Duration, Utc};
 
-use crate::{
-    api::{fetch_launches, Launch},
-    globe::ROTATION_DEGREES_PER_SECOND,
-};
+use crate::api::{fetch_launches, Launch};
 
 const AUTO_REFRESH_INTERVAL: StdDuration = StdDuration::from_secs(5 * 60);
 const COUNTDOWN_HORIZON: Duration = Duration::days(7);
 
 type FetchResult = Result<Vec<Launch>, String>;
-
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub enum View {
-    Missions,
-    #[default]
-    Globe,
-}
 
 pub struct App {
     pub launches: Vec<Launch>,
@@ -29,12 +19,8 @@ pub struct App {
     pub loading: bool,
     pub last_updated: Option<DateTime<Utc>>,
     pub message: Option<String>,
-    pub view: View,
-    pub globe_rotation: f64,
-    pub globe_paused: bool,
     receiver: Option<Receiver<FetchResult>>,
     last_fetch_started: Option<Instant>,
-    last_animation_tick: Instant,
 }
 
 impl App {
@@ -45,12 +31,8 @@ impl App {
             loading: false,
             last_updated: None,
             message: None,
-            view: View::Globe,
-            globe_rotation: 0.0,
-            globe_paused: false,
             receiver: None,
             last_fetch_started: None,
-            last_animation_tick: Instant::now(),
         }
     }
 
@@ -78,7 +60,6 @@ impl App {
 
         match receiver.try_recv() {
             Ok(Ok(launches)) => {
-                let first_load = self.launches.is_empty();
                 let selected_id = self.selected_launch().map(|launch| launch.id);
                 self.launches = launches;
                 self.selected = selected_id
@@ -92,9 +73,6 @@ impl App {
                     .is_empty()
                     .then(|| "The launch feed returned no missions".to_string());
                 self.receiver = None;
-                if first_load {
-                    self.focus_selected_site();
-                }
             }
             Ok(Err(error)) => {
                 self.loading = false;
@@ -126,7 +104,6 @@ impl App {
     pub fn select_next(&mut self) {
         if !self.launches.is_empty() {
             self.selected = (self.selected + 1) % self.launches.len();
-            self.focus_selected_site();
         }
     }
 
@@ -136,58 +113,15 @@ impl App {
                 .selected
                 .checked_sub(1)
                 .unwrap_or(self.launches.len() - 1);
-            self.focus_selected_site();
         }
     }
 
     pub fn select_first(&mut self) {
         self.selected = 0;
-        self.focus_selected_site();
     }
 
     pub fn select_last(&mut self) {
         self.selected = self.launches.len().saturating_sub(1);
-        self.focus_selected_site();
-    }
-
-    pub fn set_view(&mut self, view: View) {
-        self.view = view;
-        if view == View::Globe {
-            self.focus_selected_site();
-        }
-    }
-
-    pub fn toggle_view(&mut self) {
-        self.set_view(match self.view {
-            View::Missions => View::Globe,
-            View::Globe => View::Missions,
-        });
-    }
-
-    pub fn toggle_globe_pause(&mut self) {
-        self.globe_paused = !self.globe_paused;
-        self.last_animation_tick = Instant::now();
-    }
-
-    pub fn advance_animation(&mut self) {
-        let now = Instant::now();
-        let elapsed = now.duration_since(self.last_animation_tick);
-        self.last_animation_tick = now;
-        if !self.globe_paused {
-            self.globe_rotation = (self.globe_rotation
-                + elapsed.as_secs_f64() * ROTATION_DEGREES_PER_SECOND)
-                .rem_euclid(360.0);
-        }
-    }
-
-    fn focus_selected_site(&mut self) {
-        if let Some(longitude) = self
-            .selected_launch()
-            .and_then(|launch| launch.coordinates)
-            .map(|point| point.longitude)
-        {
-            self.globe_rotation = longitude.rem_euclid(360.0);
-        }
     }
 }
 
@@ -273,16 +207,5 @@ mod tests {
         assert_eq!(countdown_progress(Some(t0), t0), 1.0);
         assert_eq!(countdown_progress(Some(t0), t0 + Duration::hours(1)), 1.0);
         assert_eq!(countdown_progress(None, t0), 0.0);
-    }
-
-    #[test]
-    fn globe_is_the_default_view_and_can_be_toggled() {
-        let mut app = App::new();
-
-        assert_eq!(app.view, View::Globe);
-        app.toggle_view();
-        assert_eq!(app.view, View::Missions);
-        app.set_view(View::Globe);
-        assert_eq!(app.view, View::Globe);
     }
 }
